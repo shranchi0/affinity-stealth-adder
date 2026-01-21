@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Affinity Stealth Adder",
+  "version": "1.0.0",
+  "description": "Add stealth founders from LinkedIn to Affinity CRM",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://api.affinity.co/*",
+    "https://www.linkedin.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/in/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ]
+}
