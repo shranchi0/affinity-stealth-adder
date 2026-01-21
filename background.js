@@ -211,21 +211,14 @@ async function findInternalPersonByEmail(apiKey, email) {
 
 async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
   try {
-    // First, get the fields for this list to find the Owner field
-    const fieldsResponse = await fetch(`${AFFINITY_API_BASE}/lists/${listId}/fields`, {
-      method: 'GET',
-      headers: {
-        'Authorization': 'Basic ' + btoa(':' + apiKey),
-        'Content-Type': 'application/json'
-      }
-    });
+    // Get fields - try list-specific endpoint first, then fall back to global fields
+    let fields = await getListFields(apiKey, listId);
 
-    if (!fieldsResponse.ok) {
-      console.log('Failed to get list fields');
+    if (!fields || fields.length === 0) {
+      console.log('No fields found for list');
       return;
     }
 
-    const fields = await fieldsResponse.json();
     console.log('List fields:', fields.map(f => ({ name: f.name, id: f.id, value_type: f.value_type })));
 
     // Find the Owners field (can be "Owner" or "Owners")
@@ -242,36 +235,44 @@ async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
 
     console.log('Found owner field:', ownerField);
 
-    // Try different ID values - user id first (most likely for team member fields)
+    // Try different ID values - user_id first (from whoami response)
     const idsToTry = [
-      currentUser.id,             // User ID from whoami (most common for Owner fields)
+      currentUser.user_id,        // User ID from whoami response
+      currentUser.id,             // Fallback if structure different
       currentUser.person_id,      // Internal person ID we looked up
       currentUser.grant_id        // Grant ID if available
     ].filter(Boolean);
 
     console.log('Trying owner IDs:', idsToTry);
+    console.log('List entry ID:', listEntryId);
+    console.log('Owner field ID:', ownerField.id);
 
     for (const ownerId of idsToTry) {
       try {
+        const requestBody = {
+          field_id: ownerField.id,
+          entity_id: listEntryId,
+          value: ownerId
+        };
+        console.log('Setting field value with:', requestBody);
+
         const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
           method: 'POST',
           headers: {
             'Authorization': 'Basic ' + btoa(':' + apiKey),
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            field_id: ownerField.id,
-            entity_id: listEntryId,
-            value: ownerId
-          })
+          body: JSON.stringify(requestBody)
         });
+
+        const responseText = await response.text();
+        console.log('Field value response:', response.status, responseText);
 
         if (response.ok) {
           console.log('Owner set successfully with ID:', ownerId);
           return;
         } else {
-          const errorData = await response.json().catch(() => ({}));
-          console.log('Failed to set owner with ID', ownerId, ':', errorData);
+          console.log('Failed to set owner with ID', ownerId);
         }
       } catch (e) {
         console.log('Error trying owner ID', ownerId, ':', e);
@@ -282,6 +283,51 @@ async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
   } catch (e) {
     console.log('Failed to set owner:', e);
   }
+}
+
+async function getListFields(apiKey, listId) {
+  // Try list-specific endpoint first
+  try {
+    const response = await fetch(`${AFFINITY_API_BASE}/lists/${listId}/fields`, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Basic ' + btoa(':' + apiKey),
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      return await response.json();
+    }
+    console.log('List fields endpoint failed:', response.status);
+  } catch (e) {
+    console.log('List fields request error:', e);
+  }
+
+  // Fall back to global fields endpoint
+  try {
+    const response = await fetch(`${AFFINITY_API_BASE}/fields`, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Basic ' + btoa(':' + apiKey),
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      const allFields = await response.json();
+      // Filter to this list's fields
+      return allFields.filter(f =>
+        f.list_id === parseInt(listId) ||
+        f.list_id === listId ||
+        !f.list_id  // Global fields
+      );
+    }
+  } catch (e) {
+    console.log('Global fields request error:', e);
+  }
+
+  return [];
 }
 
 async function createOrganization(apiKey, name, domain) {
