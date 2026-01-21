@@ -20,7 +20,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function handleAddToAffinity(data) {
   // Get stored credentials
-  const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityListId']);
+  const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityListId', 'affinityUserEmail']);
 
   if (!settings.affinityApiKey || !settings.affinityListId) {
     throw new Error('Please configure your Affinity API key and List ID in the extension settings.');
@@ -28,7 +28,7 @@ async function handleAddToAffinity(data) {
 
   try {
     // Get current user (for owner assignment)
-    const currentUser = await getCurrentUser(settings.affinityApiKey);
+    const currentUser = await getCurrentUser(settings.affinityApiKey, settings.affinityUserEmail);
     console.log('Current user:', currentUser);
 
     let organization, person, listEntry;
@@ -148,7 +148,7 @@ async function checkForDuplicate(data) {
   return { exists: false };
 }
 
-async function getCurrentUser(apiKey) {
+async function getCurrentUser(apiKey, userEmail) {
   try {
     const response = await fetch(`${AFFINITY_API_BASE}/whoami`, {
       method: 'GET',
@@ -162,19 +162,24 @@ async function getCurrentUser(apiKey) {
       const user = await response.json();
       console.log('Whoami response (full):', JSON.stringify(user));
 
-      // Try to find the internal person record for this user
-      // First try by email if available
-      if (user.email) {
-        const personId = await findInternalPersonByEmail(apiKey, user.email);
+      // Use the email from settings to find the person record
+      const emailToSearch = userEmail || user.email;
+      console.log('Looking up person by email:', emailToSearch);
+
+      if (emailToSearch) {
+        const personId = await findInternalPersonByEmail(apiKey, emailToSearch);
         if (personId) {
           user.person_id = personId;
+          console.log('Found person_id:', personId);
         }
       }
 
       // Also try to get from /users endpoint which may have person_id
-      const teamMember = await findTeamMemberById(apiKey, user.user_id);
-      if (teamMember && teamMember.person_id) {
-        user.person_id = teamMember.person_id;
+      if (!user.person_id) {
+        const teamMember = await findTeamMemberById(apiKey, user.user_id);
+        if (teamMember && teamMember.person_id) {
+          user.person_id = teamMember.person_id;
+        }
       }
 
       return user;
