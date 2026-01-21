@@ -242,42 +242,38 @@ async function setListEntryOwner(apiKey, listId, listEntryId, organizationId, cu
       currentUser.grant_id        // Grant ID if available
     ].filter(Boolean);
 
-    // Try both entity IDs - list entry ID and organization ID
-    const entityIdsToTry = [listEntryId, organizationId];
-
     console.log('Trying owner IDs:', ownerIdsToTry);
-    console.log('Trying entity IDs:', entityIdsToTry);
+    console.log('List entry ID:', listEntryId);
     console.log('Owner field ID:', ownerField.id);
 
-    for (const entityId of entityIdsToTry) {
-      for (const ownerId of ownerIdsToTry) {
-        try {
-          const requestBody = {
-            field_id: ownerField.id,
-            entity_id: entityId,
-            value: ownerId
-          };
-          console.log('Setting field value with:', requestBody);
+    for (const ownerId of ownerIdsToTry) {
+      try {
+        // For list-specific fields, use list_entry_id parameter
+        const requestBody = {
+          field_id: ownerField.id,
+          list_entry_id: listEntryId,
+          value: ownerId
+        };
+        console.log('Setting field value with:', requestBody);
 
-          const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
-            method: 'POST',
-            headers: {
-              'Authorization': 'Basic ' + btoa(':' + apiKey),
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(requestBody)
-          });
+        const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(':' + apiKey),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
 
-          const responseText = await response.text();
-          console.log('Field value response:', response.status, responseText);
+        const responseText = await response.text();
+        console.log('Field value response:', response.status, responseText);
 
-          if (response.ok) {
-            console.log('Owner set successfully with entity_id:', entityId, 'owner_id:', ownerId);
-            return;
-          }
-        } catch (e) {
-          console.log('Error trying entity_id', entityId, 'owner_id', ownerId, ':', e);
+        if (response.ok) {
+          console.log('Owner set successfully with owner_id:', ownerId);
+          return;
         }
+      } catch (e) {
+        console.log('Error trying owner_id', ownerId, ':', e);
       }
     }
 
