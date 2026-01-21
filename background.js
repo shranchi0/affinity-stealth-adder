@@ -70,7 +70,7 @@ async function handleAddToAffinity(data) {
 
     // Set owner on the list entry
     if (currentUser && listEntry) {
-      await setListEntryOwner(settings.affinityApiKey, settings.affinityListId, listEntry.id, currentUser);
+      await setListEntryOwner(settings.affinityApiKey, settings.affinityListId, listEntry.id, organization.id, currentUser);
       console.log('Set owner to:', currentUser.first_name, currentUser.last_name);
     }
 
@@ -209,23 +209,22 @@ async function findInternalPersonByEmail(apiKey, email) {
   return null;
 }
 
-async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
+async function setListEntryOwner(apiKey, listId, listEntryId, organizationId, currentUser) {
   try {
     // Get fields - try list-specific endpoint first, then fall back to global fields
     let fields = await getListFields(apiKey, listId);
 
     if (!fields || fields.length === 0) {
-      console.log('No fields found for list');
+      console.log('No fields found for list', listId);
       return;
     }
 
     console.log('List fields:', fields.map(f => ({ name: f.name, id: f.id, value_type: f.value_type })));
 
-    // Find the Owners field (can be "Owner" or "Owners")
+    // Find the Owners field - must match exactly "Owners" or "Owner"
     const ownerField = fields.find(f =>
       f.name.toLowerCase() === 'owners' ||
-      f.name.toLowerCase() === 'owner' ||
-      f.name.toLowerCase().includes('owner')
+      f.name.toLowerCase() === 'owner'
     );
 
     if (!ownerField) {
@@ -236,46 +235,49 @@ async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
     console.log('Found owner field:', ownerField);
 
     // Try different ID values - user_id first (from whoami response)
-    const idsToTry = [
+    const ownerIdsToTry = [
       currentUser.user_id,        // User ID from whoami response
       currentUser.id,             // Fallback if structure different
       currentUser.person_id,      // Internal person ID we looked up
       currentUser.grant_id        // Grant ID if available
     ].filter(Boolean);
 
-    console.log('Trying owner IDs:', idsToTry);
-    console.log('List entry ID:', listEntryId);
+    // Try both entity IDs - list entry ID and organization ID
+    const entityIdsToTry = [listEntryId, organizationId];
+
+    console.log('Trying owner IDs:', ownerIdsToTry);
+    console.log('Trying entity IDs:', entityIdsToTry);
     console.log('Owner field ID:', ownerField.id);
 
-    for (const ownerId of idsToTry) {
-      try {
-        const requestBody = {
-          field_id: ownerField.id,
-          entity_id: listEntryId,
-          value: ownerId
-        };
-        console.log('Setting field value with:', requestBody);
+    for (const entityId of entityIdsToTry) {
+      for (const ownerId of ownerIdsToTry) {
+        try {
+          const requestBody = {
+            field_id: ownerField.id,
+            entity_id: entityId,
+            value: ownerId
+          };
+          console.log('Setting field value with:', requestBody);
 
-        const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Basic ' + btoa(':' + apiKey),
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(requestBody)
-        });
+          const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Basic ' + btoa(':' + apiKey),
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+          });
 
-        const responseText = await response.text();
-        console.log('Field value response:', response.status, responseText);
+          const responseText = await response.text();
+          console.log('Field value response:', response.status, responseText);
 
-        if (response.ok) {
-          console.log('Owner set successfully with ID:', ownerId);
-          return;
-        } else {
-          console.log('Failed to set owner with ID', ownerId);
+          if (response.ok) {
+            console.log('Owner set successfully with entity_id:', entityId, 'owner_id:', ownerId);
+            return;
+          }
+        } catch (e) {
+          console.log('Error trying entity_id', entityId, 'owner_id', ownerId, ':', e);
         }
-      } catch (e) {
-        console.log('Error trying owner ID', ownerId, ':', e);
       }
     }
 
@@ -304,7 +306,7 @@ async function getListFields(apiKey, listId) {
     console.log('List fields request error:', e);
   }
 
-  // Fall back to global fields endpoint
+  // Fall back to global fields endpoint - but ONLY get fields for this specific list
   try {
     const response = await fetch(`${AFFINITY_API_BASE}/fields`, {
       method: 'GET',
@@ -316,12 +318,12 @@ async function getListFields(apiKey, listId) {
 
     if (response.ok) {
       const allFields = await response.json();
-      // Filter to this list's fields
-      return allFields.filter(f =>
-        f.list_id === parseInt(listId) ||
-        f.list_id === listId ||
-        !f.list_id  // Global fields
+      // ONLY return fields that belong to this specific list (not global fields)
+      const listFields = allFields.filter(f =>
+        f.list_id === parseInt(listId) || f.list_id === listId
       );
+      console.log('Fields for list', listId, ':', listFields.map(f => ({ name: f.name, id: f.id })));
+      return listFields;
     }
   } catch (e) {
     console.log('Global fields request error:', e);
