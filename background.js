@@ -160,10 +160,10 @@ async function getCurrentUser(apiKey) {
 
     if (response.ok) {
       const user = await response.json();
-      console.log('Whoami response:', user);
+      console.log('Whoami response (full):', JSON.stringify(user));
 
-      // The user object has grant_id which is what we need for Owner field
-      // Also try to get the internal person ID by searching
+      // Try to find the internal person record for this user
+      // First try by email if available
       if (user.email) {
         const personId = await findInternalPersonByEmail(apiKey, user.email);
         if (personId) {
@@ -171,11 +171,62 @@ async function getCurrentUser(apiKey) {
         }
       }
 
+      // Also try to get from /users endpoint which may have person_id
+      const teamMember = await findTeamMemberById(apiKey, user.user_id);
+      if (teamMember && teamMember.person_id) {
+        user.person_id = teamMember.person_id;
+      }
+
       return user;
     }
   } catch (e) {
     console.log('Failed to get current user:', e);
   }
+  return null;
+}
+
+async function findTeamMemberById(apiKey, userId) {
+  try {
+    // Try to get user details which might include person_id
+    const response = await fetch(`${AFFINITY_API_BASE}/users/${userId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Basic ' + btoa(':' + apiKey),
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      const user = await response.json();
+      console.log('User details:', user);
+      return user;
+    }
+  } catch (e) {
+    console.log('Failed to get user details:', e);
+  }
+
+  // Try listing all users to find matching one
+  try {
+    const response = await fetch(`${AFFINITY_API_BASE}/users`, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Basic ' + btoa(':' + apiKey),
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      const users = await response.json();
+      console.log('All users:', users);
+      const match = users.find(u => u.id === userId || u.user_id === userId);
+      if (match) {
+        return match;
+      }
+    }
+  } catch (e) {
+    console.log('Failed to list users:', e);
+  }
+
   return null;
 }
 
@@ -191,6 +242,7 @@ async function findInternalPersonByEmail(apiKey, email) {
 
     if (response.ok) {
       const data = await response.json();
+      console.log('Person search results for', email, ':', data);
       const persons = data.persons || data;
       if (Array.isArray(persons) && persons.length > 0) {
         // Find exact email match
@@ -201,6 +253,9 @@ async function findInternalPersonByEmail(apiKey, email) {
           console.log('Found internal person:', match);
           return match.id;
         }
+        // If no exact match, return first result
+        console.log('Using first person result:', persons[0]);
+        return persons[0].id;
       }
     }
   } catch (e) {
@@ -234,11 +289,11 @@ async function setListEntryOwner(apiKey, listId, listEntryId, organizationId, cu
 
     console.log('Found owner field:', ownerField);
 
-    // Try different ID values - user_id first (from whoami response)
+    // Try different ID values - person_id first (that's what Owners field needs)
     const ownerIdsToTry = [
+      currentUser.person_id,      // Internal person ID - most likely to work for Owners field
       currentUser.user_id,        // User ID from whoami response
       currentUser.id,             // Fallback if structure different
-      currentUser.person_id,      // Internal person ID we looked up
       currentUser.grant_id        // Grant ID if available
     ].filter(Boolean);
 
