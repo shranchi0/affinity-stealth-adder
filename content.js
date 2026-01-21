@@ -16,10 +16,16 @@
   }
 
   // Create floating button
-  function createFloatingButton() {
+  async function createFloatingButton() {
     // Don't show on Affinity itself or extension pages
     if (window.location.hostname.includes('affinity.co') ||
         window.location.protocol === 'chrome-extension:') {
+      return null;
+    }
+
+    // Check if button should be hidden
+    const { affinityButtonHidden } = await chrome.storage.sync.get(['affinityButtonHidden']);
+    if (affinityButtonHidden) {
       return null;
     }
 
@@ -288,15 +294,20 @@
     }, 5000);
   }
 
-  // Toggle button visibility
-  function toggleButtonVisibility() {
+  // Toggle button visibility (persists across all pages)
+  async function toggleButtonVisibility() {
+    const { affinityButtonHidden } = await chrome.storage.sync.get(['affinityButtonHidden']);
+    const newState = !affinityButtonHidden;
+
+    await chrome.storage.sync.set({ affinityButtonHidden: newState });
+
     const button = document.getElementById('affinity-stealth-btn');
-    if (button) {
-      if (button.style.display === 'none') {
-        button.style.display = 'flex';
-      } else {
-        button.style.display = 'none';
-      }
+    if (newState) {
+      // Hide button
+      if (button) button.remove();
+    } else {
+      // Show button
+      if (!button) createFloatingButton();
     }
   }
 
