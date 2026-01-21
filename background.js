@@ -70,7 +70,7 @@ async function handleAddToAffinity(data) {
 
     // Set owner on the list entry
     if (currentUser && listEntry) {
-      await setListEntryOwner(settings.affinityApiKey, settings.affinityListId, listEntry.id, currentUser.id);
+      await setListEntryOwner(settings.affinityApiKey, settings.affinityListId, listEntry.id, currentUser);
       console.log('Set owner to:', currentUser.first_name, currentUser.last_name);
     }
 
@@ -159,7 +159,19 @@ async function getCurrentUser(apiKey) {
     });
 
     if (response.ok) {
-      return response.json();
+      const user = await response.json();
+      console.log('Whoami response:', user);
+
+      // The user object has grant_id which is what we need for Owner field
+      // Also try to get the internal person ID by searching
+      if (user.email) {
+        const personId = await findInternalPersonByEmail(apiKey, user.email);
+        if (personId) {
+          user.person_id = personId;
+        }
+      }
+
+      return user;
     }
   } catch (e) {
     console.log('Failed to get current user:', e);
@@ -167,7 +179,37 @@ async function getCurrentUser(apiKey) {
   return null;
 }
 
-async function setListEntryOwner(apiKey, listId, listEntryId, userId) {
+async function findInternalPersonByEmail(apiKey, email) {
+  try {
+    const response = await fetch(`${AFFINITY_API_BASE}/persons?term=${encodeURIComponent(email)}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Basic ' + btoa(':' + apiKey),
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const persons = data.persons || data;
+      if (Array.isArray(persons) && persons.length > 0) {
+        // Find exact email match
+        const match = persons.find(p =>
+          p.emails && p.emails.some(e => e.toLowerCase() === email.toLowerCase())
+        );
+        if (match) {
+          console.log('Found internal person:', match);
+          return match.id;
+        }
+      }
+    }
+  } catch (e) {
+    console.log('Failed to find internal person:', e);
+  }
+  return null;
+}
+
+async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
   try {
     // First, get the fields for this list to find the Owner field
     const fieldsResponse = await fetch(`${AFFINITY_API_BASE}/lists/${listId}/fields`, {
@@ -184,6 +226,7 @@ async function setListEntryOwner(apiKey, listId, listEntryId, userId) {
     }
 
     const fields = await fieldsResponse.json();
+    console.log('List fields:', fields.map(f => ({ name: f.name, id: f.id, value_type: f.value_type })));
 
     // Find the Owner field (usually named "Owner" and has value_type "person")
     const ownerField = fields.find(f =>
@@ -198,26 +241,43 @@ async function setListEntryOwner(apiKey, listId, listEntryId, userId) {
 
     console.log('Found owner field:', ownerField);
 
-    // Set the owner field value
-    const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + btoa(':' + apiKey),
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        field_id: ownerField.id,
-        entity_id: listEntryId,
-        value: userId
-      })
-    });
+    // Try different ID values - person_id first, then user id, then grant_id
+    const idsToTry = [
+      currentUser.person_id,      // Internal person ID we looked up
+      currentUser.id,             // User ID from whoami
+      currentUser.grant_id        // Grant ID if available
+    ].filter(Boolean);
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.log('Failed to set owner:', errorData);
-    } else {
-      console.log('Owner set successfully');
+    console.log('Trying owner IDs:', idsToTry);
+
+    for (const ownerId of idsToTry) {
+      try {
+        const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Basic ' + btoa(':' + apiKey),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            field_id: ownerField.id,
+            entity_id: listEntryId,
+            value: ownerId
+          })
+        });
+
+        if (response.ok) {
+          console.log('Owner set successfully with ID:', ownerId);
+          return;
+        } else {
+          const errorData = await response.json().catch(() => ({}));
+          console.log('Failed to set owner with ID', ownerId, ':', errorData);
+        }
+      } catch (e) {
+        console.log('Error trying owner ID', ownerId, ':', e);
+      }
     }
+
+    console.log('All owner ID attempts failed');
   } catch (e) {
     console.log('Failed to set owner:', e);
   }
