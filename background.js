@@ -228,10 +228,11 @@ async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
     const fields = await fieldsResponse.json();
     console.log('List fields:', fields.map(f => ({ name: f.name, id: f.id, value_type: f.value_type })));
 
-    // Find the Owner field (usually named "Owner" and has value_type "person")
+    // Find the Owners field (can be "Owner" or "Owners")
     const ownerField = fields.find(f =>
+      f.name.toLowerCase() === 'owners' ||
       f.name.toLowerCase() === 'owner' ||
-      (f.value_type === 'person' && f.name.toLowerCase().includes('owner'))
+      f.name.toLowerCase().includes('owner')
     );
 
     if (!ownerField) {
@@ -241,10 +242,10 @@ async function setListEntryOwner(apiKey, listId, listEntryId, currentUser) {
 
     console.log('Found owner field:', ownerField);
 
-    // Try different ID values - person_id first, then user id, then grant_id
+    // Try different ID values - user id first (most likely for team member fields)
     const idsToTry = [
+      currentUser.id,             // User ID from whoami (most common for Owner fields)
       currentUser.person_id,      // Internal person ID we looked up
-      currentUser.id,             // User ID from whoami
       currentUser.grant_id        // Grant ID if available
     ].filter(Boolean);
 
