@@ -308,9 +308,10 @@ async function setListEntryOwner(apiKey, listId, listEntryId, organizationId, cu
 
     for (const ownerId of ownerIdsToTry) {
       try {
-        // For list-specific fields, use list_entry_id parameter
+        // For list-specific fields, need both entity_id (org) and list_entry_id
         const requestBody = {
           field_id: ownerField.id,
+          entity_id: organizationId,
           list_entry_id: listEntryId,
           value: ownerId
         };
