@@ -28,7 +28,8 @@ Chrome extension to quickly add companies and stealth founders to Affinity CRM.
 1. Click the extension icon in your Chrome toolbar
 2. Enter your **Affinity API Key** (found in Affinity → Settings → API)
 3. Enter the **List ID**: `299100`
-4. Click Save
+4. Enter your **Affinity Subdomain**: `categoryventures`
+5. Click Save
 
 ## Usage
 
