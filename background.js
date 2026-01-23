@@ -20,7 +20,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function handleAddToAffinity(data) {
   // Get stored credentials
-  const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityListId', 'affinityUserEmail']);
+  const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityListId', 'affinityTenantSubdomain', 'affinityUserEmail']);
 
   if (!settings.affinityApiKey || !settings.affinityListId) {
     throw new Error('Please configure your Affinity API key and List ID in the extension settings.');
@@ -81,7 +81,7 @@ async function handleAddToAffinity(data) {
     }
 
     // Build Affinity URL
-    const affinityUrl = `https://app.affinity.co/organizations/${organization.id}`;
+    const affinityUrl = `https://${settings.affinityTenantSubdomain}.affinity.co/companies/${organization.id}`;
 
     return {
       success: true,
@@ -98,7 +98,7 @@ async function handleAddToAffinity(data) {
 }
 
 async function checkForDuplicate(data) {
-  const settings = await chrome.storage.sync.get(['affinityApiKey']);
+  const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityTenantSubdomain']);
   if (!settings.affinityApiKey) {
     return { exists: false };
   }
@@ -136,7 +136,7 @@ async function checkForDuplicate(data) {
           return {
             exists: true,
             organization: exactMatch,
-            affinityUrl: `https://app.affinity.co/organizations/${exactMatch.id}`
+            affinityUrl: `https://${settings.affinityTenantSubdomain}.affinity.co/companies/${exactMatch.id}`
           };
         }
       }
