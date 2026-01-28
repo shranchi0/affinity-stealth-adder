@@ -1,18 +1,22 @@
 document.addEventListener('DOMContentLoaded', () => {
   const apiKeyInput = document.getElementById('apiKey');
   const listIdInput = document.getElementById('listId');
+  const peopleListIdInput = document.getElementById('peopleListId');
   const tenantSubdomainInput = document.getElementById('tenantSubdomain');
   const userEmailInput = document.getElementById('userEmail');
   const saveButton = document.getElementById('save');
   const statusDiv = document.getElementById('status');
 
   // Load saved settings
-  chrome.storage.sync.get(['affinityApiKey', 'affinityListId', 'affinityTenantSubdomain', 'affinityUserEmail'], (result) => {
+  chrome.storage.sync.get(['affinityApiKey', 'affinityListId', 'affinityPeopleListId', 'affinityTenantSubdomain', 'affinityUserEmail'], (result) => {
     if (result.affinityApiKey) {
       apiKeyInput.value = result.affinityApiKey;
     }
     if (result.affinityListId) {
       listIdInput.value = result.affinityListId;
+    }
+    if (result.affinityPeopleListId) {
+      peopleListIdInput.value = result.affinityPeopleListId;
     }
     if (result.affinityTenantSubdomain) {
       tenantSubdomainInput.value = result.affinityTenantSubdomain;
@@ -26,17 +30,19 @@ document.addEventListener('DOMContentLoaded', () => {
   saveButton.addEventListener('click', () => {
     const apiKey = apiKeyInput.value.trim();
     const listId = listIdInput.value.trim();
+    const peopleListId = peopleListIdInput.value.trim();
     const tenantSubdomain = tenantSubdomainInput.value.trim();
     const userEmail = userEmailInput.value.trim();
 
-    if (!apiKey || !listId || !tenantSubdomain) {
-      showStatus('Please fill in API key, List ID, and subdomain', 'error');
+    if (!apiKey || !listId) {
+      showStatus('Please fill in API key and List ID', 'error');
       return;
     }
 
     chrome.storage.sync.set({
       affinityApiKey: apiKey,
       affinityListId: listId,
+      affinityPeopleListId: peopleListId,
       affinityTenantSubdomain: tenantSubdomain,
       affinityUserEmail: userEmail
     }, () => {

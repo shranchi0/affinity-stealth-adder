@@ -72,8 +72,15 @@
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
               <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
-            <span>This organization may already exist in Affinity.</span>
+            <span>This may already exist in Affinity.</span>
             <a id="affinity-duplicate-link" href="#" target="_blank">View existing →</a>
+          </div>
+          <div class="affinity-list-picker">
+            <label>Add to list</label>
+            <div class="affinity-list-options">
+              <button type="button" class="affinity-list-option selected" data-list="master_deal">Master Deal List</button>
+              <button type="button" class="affinity-list-option" data-list="interesting_people">Interesting People</button>
+            </div>
           </div>
           <label for="affinity-note-input">Add a note (optional)</label>
           <textarea id="affinity-note-input" placeholder="e.g., Met at demo day, interesting AI startup..."></textarea>
@@ -91,6 +98,14 @@
     document.getElementById('affinity-modal-cancel').addEventListener('click', hideModal);
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) hideModal();
+    });
+
+    // List picker toggle
+    overlay.querySelectorAll('.affinity-list-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        overlay.querySelectorAll('.affinity-list-option').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+      });
     });
 
     return overlay;
@@ -229,8 +244,10 @@
         }
       }
 
-      // Add note to data
+      // Add note and selected list to data
       data.note = noteInput.value;
+      const selectedList = document.querySelector('.affinity-list-option.selected');
+      data.targetList = selectedList ? selectedList.dataset.list : 'master_deal';
 
       // Send to background script
       const response = await chrome.runtime.sendMessage({

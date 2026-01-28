@@ -20,85 +20,131 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function handleAddToAffinity(data) {
   // Get stored credentials
-  const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityListId', 'affinityTenantSubdomain', 'affinityUserEmail']);
+  const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityListId', 'affinityPeopleListId', 'affinityTenantSubdomain', 'affinityUserEmail']);
 
   if (!settings.affinityApiKey || !settings.affinityListId) {
     throw new Error('Please configure your Affinity API key and List ID in the extension settings.');
   }
+
+  const targetList = data.targetList || 'master_deal';
+  console.log('Target list:', targetList);
 
   try {
     // Get current user (for owner assignment)
     const currentUser = await getCurrentUser(settings.affinityApiKey, settings.affinityUserEmail);
     console.log('Current user:', currentUser);
 
-    let organization, person, listEntry;
-
-    if (data.type === 'linkedin_profile') {
-      // LinkedIn profile flow - create Stealth org with person
-      const { fullName, linkedinUrl } = data;
-      const orgName = `Stealth_${fullName}`;
-
-      // Parse name into first and last
-      const nameParts = fullName.split(' ');
-      const firstName = nameParts[0];
-      const lastName = nameParts.slice(1).join(' ') || firstName;
-
-      // Create the organization
-      organization = await createOrganization(settings.affinityApiKey, orgName, null);
-      console.log('Created organization:', organization);
-
-      // Create the person
-      person = await createPerson(settings.affinityApiKey, firstName, lastName, linkedinUrl);
-      console.log('Created/found person:', person);
-
-      // Link person to organization
-      await linkPersonToOrganization(settings.affinityApiKey, person.id, organization.id);
-      console.log('Linked person to organization');
-
+    if (targetList === 'interesting_people') {
+      return await handleInterestingPeople(settings, data, currentUser);
     } else {
-      // Website flow - create org with domain
-      const { companyName, domain, url } = data;
-
-      // Create the organization with domain
-      organization = await createOrganization(settings.affinityApiKey, companyName, domain);
-      console.log('Created organization:', organization);
+      return await handleMasterDealList(settings, data, currentUser);
     }
-
-    // Add organization to the deal list
-    listEntry = await addToList(settings.affinityApiKey, settings.affinityListId, organization.id);
-    console.log('Added to list:', listEntry);
-
-    // Set owner on the list entry
-    if (currentUser && listEntry) {
-      await setListEntryOwner(settings.affinityApiKey, settings.affinityListId, listEntry.id, organization.id, currentUser);
-      console.log('Set owner to:', currentUser.first_name, currentUser.last_name);
-    }
-
-    // Add note if provided
-    if (data.note && data.note.trim()) {
-      await addNote(settings.affinityApiKey, organization.id, data.note.trim());
-      console.log('Added note');
-    }
-
-    // Build Affinity URL
-    const affinityUrl = `https://${settings.affinityTenantSubdomain}.affinity.co/companies/${organization.id}`;
-
-    return {
-      success: true,
-      organization: organization,
-      person: person || null,
-      listEntry: listEntry,
-      owner: currentUser,
-      affinityUrl: affinityUrl
-    };
   } catch (error) {
     console.error('Affinity API Error:', error);
     throw error;
   }
 }
 
+async function handleMasterDealList(settings, data, currentUser) {
+  const apiKey = settings.affinityApiKey;
+  const listId = settings.affinityListId;
+  let organization, person;
+
+  if (data.type === 'linkedin_profile') {
+    // LinkedIn profile flow - create Stealth org with person
+    const { fullName, linkedinUrl } = data;
+    const orgName = `Stealth_${fullName}`;
+
+    const nameParts = fullName.split(' ');
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ') || firstName;
+
+    organization = await createOrganization(apiKey, orgName, null);
+    console.log('Created organization:', organization);
+
+    person = await createPerson(apiKey, firstName, lastName, linkedinUrl);
+    console.log('Created/found person:', person);
+
+    await linkPersonToOrganization(apiKey, person.id, organization.id);
+    console.log('Linked person to organization');
+  } else {
+    const { companyName, domain } = data;
+    organization = await createOrganization(apiKey, companyName, domain);
+    console.log('Created organization:', organization);
+  }
+
+  // Add organization to the deal list
+  const listEntry = await addToList(apiKey, listId, organization.id, 0); // 0 = Organization
+  console.log('Added to list:', listEntry);
+
+  // Set owner
+  if (currentUser && listEntry) {
+    await setListEntryOwner(apiKey, listId, listEntry.id, organization.id, currentUser);
+  }
+
+  // Add note
+  if (data.note && data.note.trim()) {
+    await addNote(apiKey, organization.id, data.note.trim());
+  }
+
+  const subdomain = settings.affinityTenantSubdomain || 'app';
+  const affinityUrl = `https://${subdomain}.affinity.co/companies/${organization.id}`;
+  return { success: true, organization, person: person || null, listEntry, owner: currentUser, affinityUrl };
+}
+
+async function handleInterestingPeople(settings, data, currentUser) {
+  const apiKey = settings.affinityApiKey;
+  const listId = settings.affinityPeopleListId;
+
+  if (!listId) {
+    throw new Error('Please configure the Interesting People List ID in extension settings.');
+  }
+
+  // Extract name - from LinkedIn or website
+  let firstName, lastName, linkedinUrl;
+
+  if (data.type === 'linkedin_profile') {
+    const nameParts = data.fullName.split(' ');
+    firstName = nameParts[0];
+    lastName = nameParts.slice(1).join(' ') || firstName;
+    linkedinUrl = data.linkedinUrl;
+  } else {
+    // For websites, use the company name as a fallback
+    firstName = data.companyName || 'Unknown';
+    lastName = '';
+  }
+
+  // Create the person
+  const person = await createPerson(apiKey, firstName, lastName, linkedinUrl);
+  console.log('Created/found person:', person);
+
+  // Add person to the Interesting People list
+  const listEntry = await addToList(apiKey, listId, person.id, 1); // 1 = Person
+  console.log('Added to list:', listEntry);
+
+  // Set owner
+  if (currentUser && listEntry) {
+    await setListEntryOwner(apiKey, listId, listEntry.id, person.id, currentUser);
+  }
+
+  // Set status to "Reached Out"
+  if (listEntry) {
+    await setStatus(apiKey, listId, listEntry.id, person.id, 'Reached Out');
+  }
+
+  // Add note
+  if (data.note && data.note.trim()) {
+    await addNote(apiKey, person.id, data.note.trim(), true);
+  }
+
+  const subdomain = settings.affinityTenantSubdomain || 'app';
+  const affinityUrl = `https://${subdomain}.affinity.co/persons/${person.id}`;
+  return { success: true, person, listEntry, owner: currentUser, affinityUrl };
+}
+
 async function checkForDuplicate(data) {
   const settings = await chrome.storage.sync.get(['affinityApiKey', 'affinityTenantSubdomain']);
+  const subdomain = settings.affinityTenantSubdomain || 'app';
   if (!settings.affinityApiKey) {
     return { exists: false };
   }
@@ -136,7 +182,7 @@ async function checkForDuplicate(data) {
           return {
             exists: true,
             organization: exactMatch,
-            affinityUrl: `https://${settings.affinityTenantSubdomain}.affinity.co/companies/${exactMatch.id}`
+            affinityUrl: `https://${subdomain}.affinity.co/companies/${exactMatch.id}`
           };
         }
       }
@@ -564,18 +610,22 @@ async function addLinkedInField(apiKey, personId, linkedinUrl) {
   }
 }
 
-async function addNote(apiKey, organizationId, noteContent) {
+async function addNote(apiKey, entityId, noteContent, isPerson) {
   try {
+    const body = { content: noteContent };
+    if (isPerson) {
+      body.person_ids = [entityId];
+    } else {
+      body.organization_ids = [entityId];
+    }
+
     const response = await fetch(`${AFFINITY_API_BASE}/notes`, {
       method: 'POST',
       headers: {
         'Authorization': 'Basic ' + btoa(':' + apiKey),
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        organization_ids: [organizationId],
-        content: noteContent
-      })
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {
@@ -587,7 +637,8 @@ async function addNote(apiKey, organizationId, noteContent) {
   }
 }
 
-async function addToList(apiKey, listId, organizationId) {
+async function addToList(apiKey, listId, entityId, entityType) {
+  // entityType: 0 = Organization, 1 = Person
   const response = await fetch(`${AFFINITY_API_BASE}/lists/${listId}/list-entries`, {
     method: 'POST',
     headers: {
@@ -595,8 +646,8 @@ async function addToList(apiKey, listId, organizationId) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      entity_id: organizationId,
-      entity_type: 0 // 0 = Organization, 1 = Person
+      entity_id: entityId,
+      entity_type: entityType
     })
   });
 
@@ -606,4 +657,54 @@ async function addToList(apiKey, listId, organizationId) {
   }
 
   return response.json();
+}
+
+async function setStatus(apiKey, listId, listEntryId, entityId, statusValue) {
+  try {
+    // Get fields for this list
+    const fields = await getListFields(apiKey, listId);
+
+    // Find the Status field
+    const statusField = fields.find(f =>
+      f.name.toLowerCase() === 'status'
+    );
+
+    if (!statusField) {
+      console.log('Status field not found. Available fields:', fields.map(f => f.name));
+      return;
+    }
+
+    console.log('Found status field:', statusField);
+
+    // If the field has dropdown options, find the matching one
+    let value = statusValue;
+    if (statusField.dropdown_options) {
+      const option = statusField.dropdown_options.find(o =>
+        o.text.toLowerCase() === statusValue.toLowerCase()
+      );
+      if (option) {
+        value = option.id;
+        console.log('Found status option:', option);
+      }
+    }
+
+    const response = await fetch(`${AFFINITY_API_BASE}/field-values`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + btoa(':' + apiKey),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        field_id: statusField.id,
+        entity_id: entityId,
+        list_entry_id: listEntryId,
+        value: value
+      })
+    });
+
+    const responseText = await response.text();
+    console.log('Status set response:', response.status, responseText);
+  } catch (e) {
+    console.log('Failed to set status:', e);
+  }
 }
